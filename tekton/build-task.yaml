@@ -1,0 +1,58 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: build-docker-image-from-git-source
+spec:
+  params:
+    - name: branch
+      type: string
+      default: master
+    - name: version
+      type: string
+      default: v0.0
+  resources:
+    inputs:
+      - name: start-git-repository
+        type: git
+    outputs:
+      - name: start-docker-repository
+        type: image
+  workspaces:
+  - name: app-source
+  volumes:
+  - name: varlibc
+    emptyDir: {}
+  steps:
+    - name: git-checkout
+      image: alpine/git:v2.26.2
+      workingDir: "$(workspaces.app-source.path)"
+      script: |
+        #!/usr/bin/env sh
+        rm -rf start
+        git init
+        git remote add origin $(resources.inputs.start-git-repository.url).git
+        git fetch origin
+        git checkout master
+        ls -la
+    - name: build-image
+      image: buildah/buildah
+      workingDir: "$(workspaces.app-source.path)"
+      command: ['buildah', 'bud', '--tls-verify=false', '--layers', '-f', 'Dockerfile', '-t', '$(outputs.resources.start-docker-repository.url):$(params.version)', '.']
+      volumeMounts:
+      - name: varlibc
+        mountPath: /var/lib/containers
+      securityContext:
+        allowPrivilegeEscalation: true
+        runAsUser: 0
+        privileged: true
+
+    - name: build-push
+      image: buildah/buildah
+      command: ["buildah", "push", "--tls-verify=false", '$(outputs.resources.start-docker-repository.url):$(params.version)', "docker://$(outputs.resources.start-docker-repository.url):$(params.version)"]
+      volumeMounts:
+      - name: varlibc
+        mountPath: /var/lib/containers
+      securityContext:
+        allowPrivilegeEscalation: true
+        runAsUser: 0
+        privileged: true
